@@ -1,0 +1,100 @@
+import XCTest
+@testable import PulseboardCore
+
+@MainActor
+final class PulseboardTests: XCTestCase {
+    func testThemeAndColumnRoundTrip() throws {
+        let preset = DashboardPreset(
+            name: "Round Trip",
+            subtitle: "Custom cockpit",
+            symbolName: "sparkles.rectangle.stack",
+            refreshInterval: 1.5,
+            theme: .graphite,
+            canvasStyle: .terminal,
+            cardStyle: .outline,
+            showSignalRail: false,
+            columns: DashboardPreset.defaultColumns.map { column in
+                var copy = column
+                copy.isVisible.toggle()
+                return copy
+            }
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try encoder.encode(preset)
+        let decoded = try decoder.decode(DashboardPreset.self, from: data)
+
+        XCTAssertEqual(decoded.name, "Round Trip")
+        XCTAssertEqual(decoded.subtitle, "Custom cockpit")
+        XCTAssertEqual(decoded.symbolName, "sparkles.rectangle.stack")
+        XCTAssertEqual(decoded.theme, .graphite)
+        XCTAssertEqual(decoded.resolvedCanvasStyle, .terminal)
+        XCTAssertEqual(decoded.resolvedCardStyle, .outline)
+        XCTAssertFalse(decoded.resolvedShowSignalRail)
+        XCTAssertEqual(decoded.columns, preset.columns)
+        XCTAssertEqual(decoded.refreshInterval, 1.5)
+    }
+
+    func testPresetStorePersistsJSON() throws {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("presets.json")
+
+        let store = PresetStore(storageURL: url)
+        var preset = store.selectedPreset
+        preset.name = "Saved Studio"
+        preset.theme = .neonDesk
+        preset.canvasStyle = .grid
+        preset.cardStyle = .solid
+        store.selectedPreset = preset
+
+        let reloaded = PresetStore(storageURL: url)
+        XCTAssertEqual(reloaded.presets.first?.name, "Saved Studio")
+        XCTAssertEqual(reloaded.presets.first?.theme, .neonDesk)
+        XCTAssertEqual(reloaded.presets.first?.resolvedCanvasStyle, .grid)
+        XCTAssertEqual(reloaded.presets.first?.resolvedCardStyle, .solid)
+    }
+
+    func testCPUPercentRequiresPreviousSample() {
+        XCTAssertEqual(MetricCalculator.processCPUPercent(current: 10_000, previous: nil, elapsed: 1), 0)
+        XCTAssertEqual(MetricCalculator.processCPUPercent(current: 2_000_000_000, previous: 1_000_000_000, elapsed: 1), 100, accuracy: 0.001)
+        XCTAssertEqual(MetricCalculator.processCPUPercent(current: 3_000_000_000, previous: 1_000_000_000, elapsed: 0.5), 400, accuracy: 0.001)
+    }
+
+    func testLiveSamplerDoesNotCrashOnProtectedProcesses() {
+        let sampler = CSystemSampler()
+        let first = sampler.capture(previous: nil)
+        let second = sampler.capture(previous: first)
+
+        XCTAssertFalse(first.processes.isEmpty)
+        XCTAssertFalse(second.processes.isEmpty)
+        XCTAssertTrue(second.system.cpuUsage >= 0)
+    }
+
+    func testSortingThousandSyntheticRowsIsStableEnough() {
+        var rows: [ProcessMetric] = []
+        rows.reserveCapacity(1_000)
+
+        for index in 0..<1_000 {
+            let metric = ProcessMetric(
+                pid: Int32(index),
+                name: "Process \(1_000 - index)",
+                residentMemory: UInt64(index) * 1_024 * 1_024,
+                cpuTimeNanoseconds: UInt64(index) * 1_000,
+                cpuPercent: Double(index % 100),
+                threadCount: index % 32
+            )
+            rows.append(metric)
+        }
+
+        measure {
+            let sorted = rows.sorted(using: ProcessSort(column: .memory, ascending: false))
+            XCTAssertEqual(sorted.first?.residentMemory, rows.last?.residentMemory)
+            XCTAssertEqual(sorted.count, 1_000)
+        }
+    }
+}
