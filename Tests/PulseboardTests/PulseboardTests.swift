@@ -205,6 +205,33 @@ final class PulseboardTests: XCTestCase {
         XCTAssertEqual(insights.first?.severity, .calm)
     }
 
+    func testProcessReviewFiltersProtectedProcessesAndKeptRows() {
+        let processes = [
+            ProcessMetric(pid: 2, name: "launchd", path: "/sbin/launchd", residentMemory: 4_000_000_000, cpuPercent: 80, threadCount: 120),
+            ProcessMetric(pid: 10, name: "VideoEditor", path: "/Applications/VideoEditor.app/Contents/MacOS/VideoEditor", residentMemory: 2_000_000_000, cpuPercent: 42, threadCount: 40),
+            ProcessMetric(pid: 11, name: "Browser", path: "/Applications/Browser.app/Contents/MacOS/Browser", residentMemory: 1_500_000_000, cpuPercent: 8, threadCount: 90),
+            ProcessMetric(pid: 12, name: "Tiny", path: "/Applications/Tiny.app/Contents/MacOS/Tiny", residentMemory: 80_000_000, cpuPercent: 1, threadCount: 4)
+        ]
+
+        let candidates = ProcessReviewEngine.candidates(from: processes, excluding: [11])
+
+        XCTAssertEqual(candidates.map { $0.process.pid }, [10])
+        XCTAssertEqual(candidates.first?.reasons, [.highCPU, .highMemory])
+    }
+
+    func testStableRowsKeepHeldOrderWithUpdatedMetrics() {
+        let liveRows = [
+            ProcessMetric(pid: 3, name: "Newcomer", cpuPercent: 99),
+            ProcessMetric(pid: 1, name: "Editor", cpuPercent: 5),
+            ProcessMetric(pid: 2, name: "Build", cpuPercent: 24)
+        ]
+
+        let stable = ProcessReviewEngine.stableRows(from: liveRows, heldPIDs: [2, 1])
+
+        XCTAssertEqual(stable.map(\.pid), [2, 1, 3])
+        XCTAssertEqual(stable.first?.cpuPercent, 24)
+    }
+
     func testSortingThousandSyntheticRowsIsStableEnough() {
         var rows: [ProcessMetric] = []
         rows.reserveCapacity(1_000)

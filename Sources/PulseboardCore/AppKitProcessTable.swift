@@ -63,12 +63,18 @@ public struct ProcessTableView: NSViewRepresentable {
         tableView.reloadData()
 
         if let selectedPID, let row = processes.firstIndex(where: { $0.pid == selectedPID }) {
+            let shouldScroll = context.coordinator.lastScrolledSelection != selectedPID
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            tableView.scrollRowToVisible(row)
+            if shouldScroll {
+                tableView.scrollRowToVisible(row)
+                context.coordinator.lastScrolledSelection = selectedPID
+            }
         } else if selectedPID != nil {
             context.coordinator.parent.selectedPID = nil
+            context.coordinator.lastScrolledSelection = nil
             tableView.deselectAll(nil)
         } else if selectedPID == nil {
+            context.coordinator.lastScrolledSelection = nil
             tableView.deselectAll(nil)
         }
     }
@@ -77,6 +83,7 @@ public struct ProcessTableView: NSViewRepresentable {
     public final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var parent: ProcessTableView
         weak var tableView: NSTableView?
+        var lastScrolledSelection: Int32?
 
         init(parent: ProcessTableView) {
             self.parent = parent

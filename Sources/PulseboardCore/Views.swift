@@ -42,7 +42,8 @@ public struct PulseboardRootView: View {
                 if presets.selectedPreset.widgets.contains(where: { $0.kind == .processTable && $0.isVisible }) {
                     ProcessTablePane(
                         preset: presetBinding,
-                        selectedPID: $selectedPID
+                        selectedPID: $selectedPID,
+                        requestAction: { pendingAction = $0 }
                     )
                     .environmentObject(monitor)
                     .frame(minHeight: 220, idealHeight: 310)
@@ -1346,11 +1347,24 @@ private struct ProcessTablePane: View {
     @EnvironmentObject private var monitor: MonitorStore
     @Binding var preset: DashboardPreset
     @Binding var selectedPID: Int32?
+    var requestAction: (ProcessAction) -> Void
 
-    private var displayedProcesses: [ProcessMetric] {
+    @State private var isRankingHeld = false
+    @State private var heldProcessIDs: [Int32] = []
+    @State private var keptReviewPIDs = Set<Int32>()
+    @State private var reviewCandidates: [ProcessReviewCandidate] = []
+    @State private var isReviewPresented = false
+
+    private var liveDisplayedProcesses: [ProcessMetric] {
         monitor.snapshot.processes
             .filtered(preset.processFilter)
             .sorted(using: preset.processSort)
+    }
+
+    private var displayedProcesses: [ProcessMetric] {
+        isRankingHeld
+            ? ProcessReviewEngine.stableRows(from: liveDisplayedProcesses, heldPIDs: heldProcessIDs)
+            : liveDisplayedProcesses
     }
 
     var body: some View {
@@ -1359,14 +1373,32 @@ private struct ProcessTablePane: View {
                 Label("Processes", systemImage: "tablecells")
                     .font(.headline)
 
+                if isRankingHeld {
+                    BadgeLabel(title: "Focus Lock", systemImage: "pause.circle")
+                }
+
                 TextField("Filter", text: Binding(
                     get: { preset.processFilter },
                     set: { preset.processFilter = $0 }
                 ))
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
+                .frame(width: 180)
 
                 Spacer()
+
+                Button {
+                    presentReview()
+                } label: {
+                    Label("Review", systemImage: "checklist")
+                }
+                .help("Review cleanup candidates")
+
+                Button {
+                    toggleRankingHold()
+                } label: {
+                    Label(isRankingHeld ? "Resume" : "Hold", systemImage: isRankingHeld ? "play.fill" : "pause.fill")
+                }
+                .help(isRankingHeld ? "Resume live sorting" : "Hold the current process order")
 
                 Picker("Sort", selection: Binding(
                     get: { preset.processSort.column },
@@ -1376,7 +1408,7 @@ private struct ProcessTablePane: View {
                         Text(column.title).tag(column)
                     }
                 }
-                .frame(width: 140)
+                .frame(width: 120)
 
                 Button {
                     preset.processSort.ascending.toggle()
@@ -1400,6 +1432,190 @@ private struct ProcessTablePane: View {
                 }
             )
         }
+        .sheet(isPresented: $isReviewPresented) {
+            ProcessCleanupReviewSheet(
+                candidates: reviewCandidates,
+                accent: Color(hex: preset.theme.accentHex),
+                refresh: presentReview,
+                kill: { candidate in
+                    isReviewPresented = false
+                    requestAction(.forceQuit(candidate.process))
+                },
+                keep: { candidate in
+                    keptReviewPIDs.insert(candidate.process.pid)
+                    removeReviewCandidate(candidate)
+                }
+            )
+            .frame(width: 620, height: 520)
+        }
+        .onChange(of: selectedPID) { _, newValue in
+            guard newValue != nil, !isRankingHeld else { return }
+            captureRankingHold()
+        }
+        .onChange(of: preset.processFilter) { _, _ in
+            guard isRankingHeld else { return }
+            captureRankingHold()
+        }
+        .onChange(of: preset.processSort) { _, _ in
+            guard isRankingHeld else { return }
+            captureRankingHold()
+        }
+    }
+
+    private func toggleRankingHold() {
+        isRankingHeld.toggle()
+        if isRankingHeld {
+            captureRankingHold()
+        } else {
+            heldProcessIDs = []
+        }
+    }
+
+    private func captureRankingHold() {
+        isRankingHeld = true
+        heldProcessIDs = liveDisplayedProcesses.map(\.pid)
+    }
+
+    private func presentReview() {
+        reviewCandidates = ProcessReviewEngine.candidates(
+            from: monitor.snapshot.processes,
+            excluding: keptReviewPIDs
+        )
+        isReviewPresented = true
+    }
+
+    private func removeReviewCandidate(_ candidate: ProcessReviewCandidate) {
+        reviewCandidates.removeAll { $0.id == candidate.id }
+    }
+}
+
+private struct ProcessCleanupReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var candidates: [ProcessReviewCandidate]
+    var accent: Color
+    var refresh: () -> Void
+    var kill: (ProcessReviewCandidate) -> Void
+    var keep: (ProcessReviewCandidate) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Label("Cleanup Review", systemImage: "checklist")
+                    .font(.headline)
+                Text("\(candidates.count) candidate\(candidates.count == 1 ? "" : "s")")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button(action: refresh) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh candidates")
+
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.bar)
+
+            Divider()
+
+            if candidates.isEmpty {
+                ContentUnavailableView(
+                    "No cleanup candidates",
+                    systemImage: "checkmark.circle",
+                    description: Text("Pulseboard did not find high-resource user processes that look safe to review.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(candidates) { candidate in
+                            ProcessCleanupCandidateRow(
+                                candidate: candidate,
+                                accent: accent,
+                                kill: { kill(candidate) },
+                                keep: { keep(candidate) }
+                            )
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+    }
+}
+
+private struct ProcessCleanupCandidateRow: View {
+    var candidate: ProcessReviewCandidate
+    var accent: Color
+    var kill: () -> Void
+    var keep: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(accent.opacity(0.14))
+                Image(systemName: "app.badge")
+                    .foregroundStyle(accent)
+            }
+            .frame(width: 38, height: 38)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(candidate.process.name)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Text("PID \(candidate.process.pid)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(candidate.reasons.map(\.title).joined(separator: ", "))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
+
+                HStack(spacing: 10) {
+                    Label(String(format: "%.1f%% CPU", candidate.process.cpuPercent), systemImage: "cpu")
+                    Label(ByteFormatter.string(candidate.process.residentMemory), systemImage: "memorychip")
+                    Label("\(candidate.process.threadCount)", systemImage: "line.3.horizontal")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Text(candidate.process.path.isEmpty ? "Path unavailable" : candidate.process.path)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(spacing: 8) {
+                Button(role: .destructive, action: kill) {
+                    Label("Kill", systemImage: "xmark.octagon")
+                }
+                Button(action: keep) {
+                    Label("Keep", systemImage: "checkmark.circle")
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
     }
 }
 
