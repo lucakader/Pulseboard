@@ -117,10 +117,12 @@ public final class PresetStore: ObservableObject {
 public final class MonitorStore: ObservableObject {
     @Published public private(set) var snapshot: MetricSnapshot = .empty
     @Published public private(set) var history: [MetricSnapshot] = []
+    @Published public private(set) var isRefreshing = false
     @Published public var lastError: String?
 
     private let sampler: SystemSampling
     private var timer: Timer?
+    private var refreshTask: Task<Void, Never>?
 
     public init(sampler: SystemSampling = CSystemSampler()) {
         self.sampler = sampler
@@ -128,11 +130,11 @@ public final class MonitorStore: ObservableObject {
 
     public func start(interval: TimeInterval) {
         stop()
-        refreshNow()
+        refreshInBackground()
 
         timer = Timer.scheduledTimer(withTimeInterval: max(0.25, interval), repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshNow()
+                self?.refreshInBackground()
             }
         }
     }
@@ -140,10 +142,38 @@ public final class MonitorStore: ObservableObject {
     public func stop() {
         timer?.invalidate()
         timer = nil
+        refreshTask?.cancel()
+        refreshTask = nil
+        isRefreshing = false
     }
 
     public func refreshNow() {
         let next = sampler.capture(previous: history.last)
+        apply(next)
+    }
+
+    public func refreshInBackground() {
+        guard !isRefreshing else { return }
+
+        let previous = history.last
+        let sampler = sampler
+        isRefreshing = true
+
+        refreshTask = Task { [weak self] in
+            let next = await Task.detached(priority: .userInitiated) {
+                sampler.capture(previous: previous)
+            }.value
+
+            await MainActor.run {
+                guard let self, !Task.isCancelled else { return }
+                self.apply(next)
+                self.isRefreshing = false
+                self.refreshTask = nil
+            }
+        }
+    }
+
+    private func apply(_ next: MetricSnapshot) {
         snapshot = next
         history.append(next)
         if history.count > 120 {

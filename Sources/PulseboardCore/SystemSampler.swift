@@ -1,7 +1,7 @@
 import Foundation
 import PulseboardSystem
 
-public protocol SystemSampling {
+public protocol SystemSampling: Sendable {
     func capture(previous: MetricSnapshot?) -> MetricSnapshot
 }
 

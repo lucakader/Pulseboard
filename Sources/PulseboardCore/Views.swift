@@ -69,7 +69,7 @@ public struct PulseboardRootView: View {
         }
         .sheet(isPresented: $isCommandPalettePresented) {
             CommandPaletteView(
-                refresh: { monitor.refreshNow() },
+                refresh: { monitor.refreshInBackground() },
                 customize: { isCustomizing = true },
                 duplicate: { presets.duplicateSelected() }
             )
@@ -345,10 +345,11 @@ private struct MonitorToolbar: View {
             MetricPill(title: "Load", value: String(format: "%.2f", monitor.snapshot.system.loadAverage1), color: .orange)
 
             Button {
-                monitor.refreshNow()
+                monitor.refreshInBackground()
             } label: {
-                Image(systemName: "arrow.clockwise")
+                Image(systemName: monitor.isRefreshing ? "hourglass" : "arrow.clockwise")
             }
+            .disabled(monitor.isRefreshing)
             .help("Refresh")
 
             Button {

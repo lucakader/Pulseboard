@@ -117,6 +117,25 @@ final class PulseboardTests: XCTestCase {
         XCTAssertTrue(second.system.cpuUsage >= 0)
     }
 
+    func testBackgroundRefreshUpdatesStore() async throws {
+        let expected = MetricSnapshot(
+            timestamp: Date(),
+            system: SystemMetric(cpuUsage: 42),
+            processes: [
+                ProcessMetric(pid: 7, name: "Fixture")
+            ],
+            isWarm: true
+        )
+        let store = MonitorStore(sampler: FixedSampler(snapshot: expected))
+
+        store.refreshInBackground()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(store.snapshot.system.cpuUsage, 42)
+        XCTAssertEqual(store.snapshot.processes.first?.name, "Fixture")
+        XCTAssertFalse(store.isRefreshing)
+    }
+
     func testSortingThousandSyntheticRowsIsStableEnough() {
         var rows: [ProcessMetric] = []
         rows.reserveCapacity(1_000)
@@ -138,5 +157,13 @@ final class PulseboardTests: XCTestCase {
             XCTAssertEqual(sorted.first?.residentMemory, rows.last?.residentMemory)
             XCTAssertEqual(sorted.count, 1_000)
         }
+    }
+}
+
+private struct FixedSampler: SystemSampling {
+    var snapshot: MetricSnapshot
+
+    func capture(previous: MetricSnapshot?) -> MetricSnapshot {
+        snapshot
     }
 }
