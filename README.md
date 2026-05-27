@@ -19,6 +19,7 @@ swift test
 ## What is included
 
 - Native split-pane monitor UI with dashboard presets, live widgets, process table, inspector, and dashboard cover area.
+- Simplified default workspace with one overview card, the process table, and optional details on demand.
 - Customizable dashboards with saved JSON presets in Application Support.
 - Studio controls for dashboard title, subtitle, SF Symbol, theme swatches, canvas style, card style, density, chart style, signal rail, refresh interval, widget titles, widget sizes, widget order, and column visibility.
 - Focus profiles for Balanced, Coding, Creative, Battery, and Performance workflows.

@@ -7,7 +7,6 @@ public struct PulseboardRootView: View {
     @StateObject private var processController = ProcessController()
     @State private var selectedPID: Int32?
     @State private var isCustomizing = false
-    @State private var isCommandPalettePresented = false
     @State private var pendingAction: ProcessAction?
 
     public init() {}
@@ -33,8 +32,7 @@ public struct PulseboardRootView: View {
                 MonitorWorkspaceView(
                     preset: presetBinding,
                     selectedPID: $selectedPID,
-                    isCustomizing: $isCustomizing,
-                    isCommandPalettePresented: $isCommandPalettePresented
+                    isCustomizing: $isCustomizing
                 )
                 .environmentObject(monitor)
                 .frame(minWidth: 680, minHeight: 460)
@@ -67,14 +65,6 @@ public struct PulseboardRootView: View {
                 resetDefaults: { presets.resetDefaults() }
             )
             .frame(minWidth: 760, idealWidth: 900, minHeight: 660, idealHeight: 760)
-        }
-        .sheet(isPresented: $isCommandPalettePresented) {
-            CommandPaletteView(
-                refresh: { monitor.refreshInBackground() },
-                customize: { isCustomizing = true },
-                duplicate: { presets.duplicateSelected() }
-            )
-            .frame(width: 480, height: 420)
         }
         .confirmationDialog(
             confirmationTitle,
@@ -275,51 +265,60 @@ private struct MonitorWorkspaceView: View {
     @Binding var preset: DashboardPreset
     @Binding var selectedPID: Int32?
     @Binding var isCustomizing: Bool
-    @Binding var isCommandPalettePresented: Bool
+    @State private var showDetails = false
 
     private var visibleWidgets: [WidgetConfig] {
         preset.widgets.filter(\.isVisible).sorted { $0.order < $1.order }.filter { $0.kind != .processTable }
+    }
+
+    private var systemInsights: [SmartInsight] {
+        SmartInsightEngine.insights(for: monitor.snapshot, profile: preset.resolvedFocusProfile)
+    }
+
+    private var actionableInsights: [SmartInsight] {
+        let insights = systemInsights.filter { $0.severity != .calm }
+        return insights.isEmpty && !monitor.snapshot.isWarm ? systemInsights : insights
     }
 
     var body: some View {
         VStack(spacing: 0) {
             MonitorToolbar(
                 preset: $preset,
-                isCustomizing: $isCustomizing,
-                isCommandPalettePresented: $isCommandPalettePresented
+                isCustomizing: $isCustomizing
             )
             .environmentObject(monitor)
 
             ScrollView {
                 VStack(spacing: 14) {
-                    DashboardHeroView(
+                    SimpleOverviewView(
                         preset: preset,
                         snapshot: monitor.snapshot,
+                        insightCount: actionableInsights.count,
+                        showDetails: showDetails,
                         customize: { isCustomizing = true },
-                        command: { isCommandPalettePresented = true }
+                        toggleDetails: { showDetails.toggle() }
                     )
 
-                    FocusProfileStrip(preset: $preset)
-
-                    if preset.resolvedShowSignalRail {
-                        SignalRailView(preset: preset, snapshot: monitor.snapshot)
+                    if !actionableInsights.isEmpty {
+                        SmartInsightsView(
+                            insights: actionableInsights,
+                            accent: Color(hex: preset.theme.accentHex),
+                            secondary: Color(hex: preset.theme.secondaryHex),
+                            selectProcess: { selectedPID = $0 }
+                        )
                     }
 
-                    SmartInsightsView(
-                        insights: SmartInsightEngine.insights(
-                            for: monitor.snapshot,
-                            profile: preset.resolvedFocusProfile
-                        ),
-                        accent: Color(hex: preset.theme.accentHex),
-                        secondary: Color(hex: preset.theme.secondaryHex),
-                        selectProcess: { selectedPID = $0 }
-                    )
+                    if showDetails {
+                        if preset.resolvedShowSignalRail {
+                            SignalRailView(preset: preset, snapshot: monitor.snapshot)
+                        }
 
-                    LazyVGrid(columns: gridColumns, spacing: 12) {
-                        ForEach(visibleWidgets) { widget in
-                            WidgetCard(widget: widget, preset: preset, snapshot: monitor.snapshot, history: monitor.history)
-                                .frame(minHeight: widget.size == .compact ? 150 : 204)
-                                .gridCellColumns(widget.size == .wide ? 2 : 1)
+                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                            ForEach(visibleWidgets) { widget in
+                                WidgetCard(widget: widget, preset: preset, snapshot: monitor.snapshot, history: monitor.history)
+                                    .frame(minHeight: widget.size == .compact ? 150 : 204)
+                                    .gridCellColumns(widget.size == .wide ? 2 : 1)
+                            }
                         }
                     }
                 }
@@ -339,7 +338,6 @@ private struct MonitorToolbar: View {
     @EnvironmentObject private var monitor: MonitorStore
     @Binding var preset: DashboardPreset
     @Binding var isCustomizing: Bool
-    @Binding var isCommandPalettePresented: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -364,13 +362,6 @@ private struct MonitorToolbar: View {
             }
             .disabled(monitor.isRefreshing)
             .help("Refresh")
-
-            Button {
-                isCommandPalettePresented = true
-            } label: {
-                Image(systemName: "command")
-            }
-            .help("Command Palette")
 
             Button {
                 isCustomizing = true
@@ -408,6 +399,94 @@ private struct MetricPill: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct SimpleOverviewView: View {
+    var preset: DashboardPreset
+    var snapshot: MetricSnapshot
+    var insightCount: Int
+    var showDetails: Bool
+    var customize: () -> Void
+    var toggleDetails: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("Overview")
+                            .font(.title2.weight(.semibold))
+                        StatusDot(isWarm: snapshot.isWarm, color: accent)
+                    }
+
+                    Text(statusText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button(action: toggleDetails) {
+                    Label(showDetails ? "Hide Details" : "Details", systemImage: showDetails ? "eye.slash" : "chart.bar")
+                }
+
+                Button(action: customize) {
+                    Label("Customize", systemImage: "slider.horizontal.3")
+                }
+            }
+
+            HStack(spacing: 10) {
+                SimpleMetricTile(title: "CPU", value: snapshot.system.cpuUsage.percentText, color: accent)
+                SimpleMetricTile(title: "Memory", value: snapshot.system.memoryPressure.percentText, color: secondary)
+                SimpleMetricTile(title: "Load", value: String(format: "%.2f", snapshot.system.loadAverage1), color: .orange)
+                SimpleMetricTile(title: "Network", value: ByteFormatter.rate(snapshot.system.networkDownRate + snapshot.system.networkUpRate), color: .teal)
+            }
+        }
+        .buttonStyle(.bordered)
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(accent.opacity(0.18))
+        )
+    }
+
+    private var statusText: String {
+        if !snapshot.isWarm {
+            return "Collecting one more sample for stable CPU and network readings."
+        }
+        if insightCount > 0 {
+            return "\(insightCount) item\(insightCount == 1 ? "" : "s") may need attention."
+        }
+        return "Everything looks steady. Use the process list below when something feels off."
+    }
+
+    private var accent: Color { Color(hex: preset.theme.accentHex) }
+    private var secondary: Color { Color(hex: preset.theme.secondaryHex) }
+}
+
+private struct SimpleMetricTile: View {
+    var title: String
+    var value: String
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .foregroundStyle(color)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1391,6 +1470,7 @@ private struct ProcessTablePane: View {
                 } label: {
                     Label("Review", systemImage: "checklist")
                 }
+                .buttonStyle(.borderedProminent)
                 .help("Review cleanup candidates")
 
                 Button {
@@ -1399,23 +1479,6 @@ private struct ProcessTablePane: View {
                     Label(isRankingHeld ? "Resume" : "Hold", systemImage: isRankingHeld ? "play.fill" : "pause.fill")
                 }
                 .help(isRankingHeld ? "Resume live sorting" : "Hold the current process order")
-
-                Picker("Sort", selection: Binding(
-                    get: { preset.processSort.column },
-                    set: { preset.processSort.column = $0 }
-                )) {
-                    ForEach(ProcessColumn.allCases) { column in
-                        Text(column.title).tag(column)
-                    }
-                }
-                .frame(width: 120)
-
-                Button {
-                    preset.processSort.ascending.toggle()
-                } label: {
-                    Image(systemName: preset.processSort.ascending ? "arrow.up" : "arrow.down")
-                }
-                .help("Sort Direction")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
