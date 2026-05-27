@@ -21,6 +21,8 @@ swift test
 - Native split-pane monitor UI with dashboard presets, live widgets, process table, inspector, and dashboard cover area.
 - Customizable dashboards with saved JSON presets in Application Support.
 - Studio controls for dashboard title, subtitle, SF Symbol, theme swatches, canvas style, card style, density, chart style, signal rail, refresh interval, widget titles, widget sizes, widget order, and column visibility.
+- Focus profiles for Balanced, Coding, Creative, Battery, and Performance workflows.
+- Smart System Brief cards that surface high CPU, memory pressure, disk pressure, network spikes, and heavy processes.
 - Richer metric cards for memory composition, disk capacity, network lanes, trend lines, and ranked CPU offenders.
 - Public macOS process/system sampling through `libproc`, Mach host statistics, disk capacity APIs, and network interface counters.
 - Process actions for quit, force quit, and reveal in Finder.

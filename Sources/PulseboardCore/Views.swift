@@ -298,9 +298,21 @@ private struct MonitorWorkspaceView: View {
                         command: { isCommandPalettePresented = true }
                     )
 
+                    FocusProfileStrip(preset: $preset)
+
                     if preset.resolvedShowSignalRail {
                         SignalRailView(preset: preset, snapshot: monitor.snapshot)
                     }
+
+                    SmartInsightsView(
+                        insights: SmartInsightEngine.insights(
+                            for: monitor.snapshot,
+                            profile: preset.resolvedFocusProfile
+                        ),
+                        accent: Color(hex: preset.theme.accentHex),
+                        secondary: Color(hex: preset.theme.secondaryHex),
+                        selectProcess: { selectedPID = $0 }
+                    )
 
                     LazyVGrid(columns: gridColumns, spacing: 12) {
                         ForEach(visibleWidgets) { widget in
@@ -431,6 +443,7 @@ private struct DashboardHeroView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
+                    BadgeLabel(title: preset.resolvedFocusProfile.title, systemImage: preset.resolvedFocusProfile.symbolName)
                     BadgeLabel(title: preset.resolvedCanvasStyle.title, systemImage: "rectangle.dashed")
                     BadgeLabel(title: preset.resolvedCardStyle.title, systemImage: "square.stack")
                     BadgeLabel(title: String(format: "%.1fs", preset.refreshInterval), systemImage: "timer")
@@ -546,6 +559,51 @@ private struct HeroMetric: View {
     }
 }
 
+private struct FocusProfileStrip: View {
+    @Binding var preset: DashboardPreset
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(FocusProfile.allCases) { profile in
+                    Button {
+                        preset.applyFocusProfile(profile)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 6) {
+                                Image(systemName: profile.symbolName)
+                                    .font(.caption.weight(.semibold))
+                                Text(profile.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                            Text(profile.refreshInterval == 0.5 ? "Live fast" : String(format: "%.1fs refresh", profile.refreshInterval))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 154, alignment: .leading)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(isSelected(profile) ? Color(hex: preset.theme.accentHex).opacity(0.14) : Color(nsColor: .controlBackgroundColor).opacity(0.72))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(isSelected(profile) ? Color(hex: preset.theme.accentHex).opacity(0.55) : Color.primary.opacity(0.08))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func isSelected(_ profile: FocusProfile) -> Bool {
+        preset.resolvedFocusProfile == profile
+    }
+}
+
 private struct SignalRailView: View {
     var preset: DashboardPreset
     var snapshot: MetricSnapshot
@@ -601,6 +659,110 @@ private struct SignalTile: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(color.opacity(0.18))
         )
+    }
+}
+
+private struct SmartInsightsView: View {
+    var insights: [SmartInsight]
+    var accent: Color
+    var secondary: Color
+    var selectProcess: (Int32) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("System Brief", systemImage: "sparkle.magnifyingglass")
+                    .font(.headline)
+                Spacer()
+                Text("\(insights.count) signal\(insights.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 10)], spacing: 10) {
+                ForEach(insights) { insight in
+                    SmartInsightCard(
+                        insight: insight,
+                        accent: accent,
+                        secondary: secondary,
+                        selectProcess: selectProcess
+                    )
+                }
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
+    }
+}
+
+private struct SmartInsightCard: View {
+    var insight: SmartInsight
+    var accent: Color
+    var secondary: Color
+    var selectProcess: (Int32) -> Void
+
+    var body: some View {
+        Group {
+            if let processPID = insight.processPID {
+                Button {
+                    selectProcess(processPID)
+                } label: {
+                    content
+                }
+                .buttonStyle(.plain)
+                .help("Select process")
+            } else {
+                content
+            }
+        }
+    }
+
+    private var content: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(color.opacity(0.14))
+                Image(systemName: insight.systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: insight.severity.symbolName)
+                        .foregroundStyle(color)
+                    Text(insight.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                }
+                Text(insight.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.76), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(color.opacity(0.22))
+        )
+    }
+
+    private var color: Color {
+        switch insight.severity {
+        case .calm: accent
+        case .info: secondary
+        case .warning: .orange
+        case .critical: .red
+        }
     }
 }
 
@@ -1461,6 +1623,18 @@ private struct StyleStudioSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            StudioSectionHeader(title: "Focus Profile", systemImage: "dial.high")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+                ForEach(FocusProfile.allCases) { profile in
+                    FocusProfileStudioButton(
+                        profile: profile,
+                        isSelected: preset.resolvedFocusProfile == profile
+                    ) {
+                        preset.applyFocusProfile(profile)
+                    }
+                }
+            }
+
             StudioSectionHeader(title: "Dashboard", systemImage: "rectangle.3.group")
 
             VStack(alignment: .leading, spacing: 12) {
@@ -1585,6 +1759,49 @@ private struct ThemeSwatchButton: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(isSelected ? Color(hex: theme.accentHex).opacity(0.65) : .primary.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct FocusProfileStudioButton: View {
+    var profile: FocusProfile
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: profile.symbolName)
+                        .font(.headline)
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                    }
+                }
+                .foregroundStyle(Color(hex: profile.theme.accentHex))
+
+                Text(profile.title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(profile.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack {
+                    BadgeLabel(title: String(format: "%.1fs", profile.refreshInterval), systemImage: "timer")
+                    BadgeLabel(title: profile.processSort.column.title, systemImage: "arrow.up.arrow.down")
+                }
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color(hex: profile.theme.accentHex).opacity(0.65) : .primary.opacity(0.08))
             )
         }
         .buttonStyle(.plain)

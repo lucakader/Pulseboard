@@ -91,6 +91,138 @@ public enum CardStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum FocusProfile: String, Codable, CaseIterable, Identifiable, Sendable {
+    case balanced
+    case coding
+    case creative
+    case battery
+    case performance
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .balanced: "Balanced"
+        case .coding: "Coding"
+        case .creative: "Creative"
+        case .battery: "Battery"
+        case .performance: "Performance"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .balanced: "A calm all-purpose cockpit."
+        case .coding: "Fast signal for builds, browsers, and local services."
+        case .creative: "Memory, disk, and network for media-heavy work."
+        case .battery: "Slower polling and CPU-first triage."
+        case .performance: "Dense, fast, and unapologetically live."
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .balanced: "dial.low"
+        case .coding: "chevron.left.forwardslash.chevron.right"
+        case .creative: "wand.and.sparkles"
+        case .battery: "battery.75percent"
+        case .performance: "bolt.fill"
+        }
+    }
+
+    public var refreshInterval: TimeInterval {
+        switch self {
+        case .balanced: 1.0
+        case .coding: 0.75
+        case .creative: 1.5
+        case .battery: 3.0
+        case .performance: 0.5
+        }
+    }
+
+    public var theme: ThemeConfig {
+        switch self {
+        case .balanced: .aurora
+        case .coding: .neonDesk
+        case .creative: .fieldNotes
+        case .battery: .clarity
+        case .performance: .graphite
+        }
+    }
+
+    public var canvasStyle: CanvasStyle {
+        switch self {
+        case .balanced: .studio
+        case .coding: .grid
+        case .creative: .paper
+        case .battery: .paper
+        case .performance: .terminal
+        }
+    }
+
+    public var cardStyle: CardStyle {
+        switch self {
+        case .balanced: .glass
+        case .coding: .glass
+        case .creative: .editorial
+        case .battery: .outline
+        case .performance: .outline
+        }
+    }
+
+    public var processSort: ProcessSort {
+        switch self {
+        case .balanced, .coding, .battery, .performance:
+            ProcessSort(column: .cpu, ascending: false)
+        case .creative:
+            ProcessSort(column: .memory, ascending: false)
+        }
+    }
+
+    public var visibleWidgets: Set<WidgetKind> {
+        switch self {
+        case .balanced, .performance:
+            Set(WidgetKind.allCases)
+        case .coding:
+            [.cpu, .memory, .network, .topOffenders, .trend, .processTable]
+        case .creative:
+            [.memory, .disk, .network, .topOffenders, .trend, .processTable]
+        case .battery:
+            [.cpu, .memory, .network, .topOffenders, .processTable]
+        }
+    }
+
+    public var wideWidgets: Set<WidgetKind> {
+        switch self {
+        case .balanced:
+            [.topOffenders, .trend, .processTable]
+        case .coding:
+            [.topOffenders, .trend, .processTable]
+        case .creative:
+            [.memory, .trend, .processTable]
+        case .battery:
+            [.topOffenders, .processTable]
+        case .performance:
+            [.topOffenders, .trend, .processTable]
+        }
+    }
+
+    public var cpuConcernThreshold: Double {
+        switch self {
+        case .battery: 45
+        case .performance: 85
+        default: 70
+        }
+    }
+
+    public var memoryConcernThreshold: Double {
+        switch self {
+        case .creative, .performance: 85
+        default: 75
+        }
+    }
+}
+
 public enum ThemeMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case system
     case light
@@ -313,6 +445,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var subtitle: String?
     public var symbolName: String?
+    public var focusProfile: FocusProfile?
     public var createdAt: Date
     public var updatedAt: Date
     public var refreshInterval: TimeInterval
@@ -330,6 +463,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
         name: String,
         subtitle: String? = nil,
         symbolName: String? = nil,
+        focusProfile: FocusProfile? = .balanced,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         refreshInterval: TimeInterval = 1,
@@ -346,6 +480,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
         self.name = name
         self.subtitle = subtitle
         self.symbolName = symbolName
+        self.focusProfile = focusProfile
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.refreshInterval = refreshInterval
@@ -384,6 +519,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
             name: "Focus",
             subtitle: "Live system cockpit",
             symbolName: "sparkles.rectangle.stack",
+            focusProfile: .balanced,
             theme: .aurora,
             canvasStyle: .studio,
             cardStyle: .glass
@@ -392,6 +528,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
             name: "Dense Ops",
             subtitle: "Process-heavy operations view",
             symbolName: "rectangle.grid.3x2",
+            focusProfile: .performance,
             theme: .graphite,
             canvasStyle: .terminal,
             cardStyle: .outline,
@@ -405,6 +542,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
             name: "Clean Room",
             subtitle: "Quiet memory-first workspace",
             symbolName: "square.dashed.inset.filled",
+            focusProfile: .creative,
             theme: .clarity,
             canvasStyle: .paper,
             cardStyle: .editorial,
@@ -414,6 +552,7 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
 }
 
 public extension DashboardPreset {
+    var resolvedFocusProfile: FocusProfile { focusProfile ?? .balanced }
     var resolvedCanvasStyle: CanvasStyle { canvasStyle ?? .studio }
     var resolvedCardStyle: CardStyle { cardStyle ?? .glass }
     var resolvedSymbolName: String { symbolName?.trimmedOrNil ?? "rectangle.3.group" }
@@ -425,6 +564,7 @@ public extension DashboardPreset {
         copy.name = copy.name.trimmedOrFallback("Untitled Dashboard")
         copy.subtitle = copy.subtitle?.trimmedOrNil
         copy.symbolName = copy.symbolName?.trimmedOrNil
+        copy.focusProfile = copy.resolvedFocusProfile
         copy.refreshInterval = copy.refreshInterval.clamped(to: 0.5...5)
         copy.theme = copy.theme.normalized()
         copy.canvasStyle = copy.resolvedCanvasStyle
@@ -433,6 +573,17 @@ public extension DashboardPreset {
         copy.widgets = Self.normalizedWidgets(copy.widgets)
         copy.columns = Self.normalizedColumns(copy.columns)
         return copy
+    }
+
+    mutating func applyFocusProfile(_ profile: FocusProfile) {
+        focusProfile = profile
+        refreshInterval = profile.refreshInterval
+        theme = profile.theme
+        canvasStyle = profile.canvasStyle
+        cardStyle = profile.cardStyle
+        showSignalRail = true
+        processSort = profile.processSort
+        widgets = Self.profiledWidgets(widgets, profile: profile)
     }
 
     private static func normalizedWidgets(_ widgets: [WidgetConfig]) -> [WidgetConfig] {
@@ -470,6 +621,15 @@ public extension DashboardPreset {
         return defaultColumns.map { fallback in
             var copy = existingByID[fallback.id] ?? fallback
             copy.width = copy.width.clamped(to: 48...900)
+            return copy
+        }
+    }
+
+    private static func profiledWidgets(_ widgets: [WidgetConfig], profile: FocusProfile) -> [WidgetConfig] {
+        normalizedWidgets(widgets).map { widget in
+            var copy = widget
+            copy.isVisible = profile.visibleWidgets.contains(copy.kind)
+            copy.size = profile.wideWidgets.contains(copy.kind) ? .wide : (copy.kind == .disk || copy.kind == .network ? .compact : .regular)
             return copy
         }
     }

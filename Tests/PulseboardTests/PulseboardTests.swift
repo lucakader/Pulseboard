@@ -8,6 +8,7 @@ final class PulseboardTests: XCTestCase {
             name: "Round Trip",
             subtitle: "Custom cockpit",
             symbolName: "sparkles.rectangle.stack",
+            focusProfile: .coding,
             refreshInterval: 1.5,
             theme: .graphite,
             canvasStyle: .terminal,
@@ -31,6 +32,7 @@ final class PulseboardTests: XCTestCase {
         XCTAssertEqual(decoded.name, "Round Trip")
         XCTAssertEqual(decoded.subtitle, "Custom cockpit")
         XCTAssertEqual(decoded.symbolName, "sparkles.rectangle.stack")
+        XCTAssertEqual(decoded.resolvedFocusProfile, .coding)
         XCTAssertEqual(decoded.theme, .graphite)
         XCTAssertEqual(decoded.resolvedCanvasStyle, .terminal)
         XCTAssertEqual(decoded.resolvedCardStyle, .outline)
@@ -57,6 +59,24 @@ final class PulseboardTests: XCTestCase {
         XCTAssertEqual(reloaded.presets.first?.theme, .neonDesk)
         XCTAssertEqual(reloaded.presets.first?.resolvedCanvasStyle, .grid)
         XCTAssertEqual(reloaded.presets.first?.resolvedCardStyle, .solid)
+    }
+
+    func testApplyingFocusProfileTunesDashboardWithoutRenamingIt() {
+        var preset = DashboardPreset(name: "My Workbench", theme: .aurora)
+        preset.widgets[0].title = "Custom CPU"
+
+        preset.applyFocusProfile(.battery)
+
+        XCTAssertEqual(preset.name, "My Workbench")
+        XCTAssertEqual(preset.resolvedFocusProfile, .battery)
+        XCTAssertEqual(preset.refreshInterval, FocusProfile.battery.refreshInterval)
+        XCTAssertEqual(preset.theme, FocusProfile.battery.theme)
+        XCTAssertEqual(preset.processSort, FocusProfile.battery.processSort)
+        XCTAssertEqual(preset.widgets.first(where: { $0.kind == .cpu })?.title, "Custom CPU")
+        XCTAssertEqual(
+            Set(preset.widgets.filter(\.isVisible).map(\.kind)),
+            FocusProfile.battery.visibleWidgets
+        )
     }
 
     func testPresetNormalizationRepairsEditableState() {
@@ -134,6 +154,55 @@ final class PulseboardTests: XCTestCase {
         XCTAssertEqual(store.snapshot.system.cpuUsage, 42)
         XCTAssertEqual(store.snapshot.processes.first?.name, "Fixture")
         XCTAssertFalse(store.isRefreshing)
+    }
+
+    func testSmartInsightsSurfaceActionableSignals() {
+        let snapshot = MetricSnapshot(
+            system: SystemMetric(
+                cpuUsage: 92,
+                totalMemory: 16_000_000_000,
+                freeMemory: 800_000_000,
+                memoryPressure: 91,
+                diskUsed: 940,
+                diskTotal: 1_000,
+                networkDownRate: 6_000_000,
+                networkUpRate: 500_000
+            ),
+            processes: [
+                ProcessMetric(pid: 42, name: "Renderer", residentMemory: 3_500_000_000, cpuPercent: 76, threadCount: 18)
+            ],
+            isWarm: true
+        )
+
+        let insights = SmartInsightEngine.insights(for: snapshot, profile: .balanced)
+
+        XCTAssertTrue(insights.contains { $0.id == "cpu-pressure" })
+        XCTAssertTrue(insights.contains { $0.id == "memory-pressure" })
+        XCTAssertTrue(insights.contains { $0.processPID == 42 })
+        XCTAssertEqual(insights.first?.severity, .critical)
+        XCTAssertLessThanOrEqual(insights.count, 4)
+    }
+
+    func testSmartInsightsReturnCalmFallback() {
+        let snapshot = MetricSnapshot(
+            system: SystemMetric(
+                cpuUsage: 10,
+                totalMemory: 16_000_000_000,
+                freeMemory: 8_000_000_000,
+                memoryPressure: 22,
+                diskUsed: 200,
+                diskTotal: 1_000
+            ),
+            processes: [
+                ProcessMetric(pid: 1, name: "Quiet", residentMemory: 120_000_000, cpuPercent: 2, threadCount: 3)
+            ],
+            isWarm: true
+        )
+
+        let insights = SmartInsightEngine.insights(for: snapshot, profile: .coding)
+
+        XCTAssertEqual(insights.count, 1)
+        XCTAssertEqual(insights.first?.severity, .calm)
     }
 
     func testSortingThousandSyntheticRowsIsStableEnough() {
