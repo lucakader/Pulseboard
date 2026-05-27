@@ -65,6 +65,9 @@ public struct ProcessTableView: NSViewRepresentable {
         if let selectedPID, let row = processes.firstIndex(where: { $0.pid == selectedPID }) {
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             tableView.scrollRowToVisible(row)
+        } else if selectedPID != nil {
+            context.coordinator.parent.selectedPID = nil
+            tableView.deselectAll(nil)
         } else if selectedPID == nil {
             tableView.deselectAll(nil)
         }
@@ -120,6 +123,7 @@ public struct ProcessTableView: NSViewRepresentable {
             let current = tableView.tableColumns.map { $0.identifier.rawValue }
 
             guard expected != current else {
+                updateColumnAttributes()
                 applySortDescriptor()
                 return
             }
@@ -138,6 +142,22 @@ public struct ProcessTableView: NSViewRepresentable {
             }
 
             applySortDescriptor()
+        }
+
+        private func updateColumnAttributes() {
+            guard let tableView else { return }
+
+            for config in parent.columns {
+                guard let tableColumn = tableView.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(config.id.rawValue)) else {
+                    continue
+                }
+
+                tableColumn.title = config.id.title
+                tableColumn.minWidth = min(64, max(48, config.width * 0.5))
+                if abs(tableColumn.width - config.width) > 0.5 {
+                    tableColumn.width = config.width
+                }
+            }
         }
 
         private func applySortDescriptor() {
