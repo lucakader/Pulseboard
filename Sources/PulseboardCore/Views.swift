@@ -65,7 +65,7 @@ public struct PulseboardRootView: View {
                 duplicatePreset: { presets.duplicateSelected() },
                 resetDefaults: { presets.resetDefaults() }
             )
-            .frame(minWidth: 560, minHeight: 620)
+            .frame(minWidth: 760, idealWidth: 900, minHeight: 660, idealHeight: 760)
         }
         .sheet(isPresented: $isCommandPalettePresented) {
             CommandPaletteView(
@@ -469,6 +469,7 @@ private struct DashboardHeroView: View {
                 HStack(spacing: 10) {
                     HeroMetric(title: "CPU", value: snapshot.system.cpuUsage.percentText, color: Color(hex: preset.theme.accentHex))
                     HeroMetric(title: "RAM", value: snapshot.system.memoryPressure.percentText, color: Color(hex: preset.theme.secondaryHex))
+                    HeroMetric(title: "Load", value: String(format: "%.2f", snapshot.system.loadAverage1), color: .orange)
                 }
             }
         }
@@ -534,6 +535,8 @@ private struct BadgeLabel: View {
         Label(title, systemImage: systemImage)
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
@@ -1494,6 +1497,7 @@ private struct InfoRow: View {
 }
 
 private struct CustomizationView: View {
+    @Environment(\.dismiss) private var dismiss
     @Binding var preset: DashboardPreset
     var duplicatePreset: () -> Void
     var resetDefaults: () -> Void
@@ -1503,54 +1507,80 @@ private struct CustomizationView: View {
     private let themes = ThemeConfig.builtIns
 
     var body: some View {
-        HSplitView {
-            VStack(alignment: .leading, spacing: 14) {
-                StudioPreviewCard(preset: preset)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Studio")
-                        .font(.title2.weight(.semibold))
-                    Text(preset.name)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Picker("Section", selection: $tab) {
-                    ForEach(StudioTab.allCases) { tab in
-                        Label(tab.title, systemImage: tab.systemImage).tag(tab)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Label("Customize Dashboard", systemImage: "slider.horizontal.3")
+                    .font(.headline)
+                Text(preset.name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 Spacer()
 
-                Button(action: duplicatePreset) {
-                    Label("Duplicate Dashboard", systemImage: "plus.square.on.square")
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Done", systemImage: "checkmark")
                 }
-                Button(role: .destructive, action: resetDefaults) {
-                    Label("Reset Defaults", systemImage: "arrow.counterclockwise")
-                }
+                .keyboardShortcut(.cancelAction)
             }
-            .padding(18)
-            .frame(minWidth: 220, idealWidth: 250)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
             .background(.bar)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    switch tab {
-                    case .style:
-                        StyleStudioSection(preset: $preset, themes: themes)
-                    case .widgets:
-                        WidgetStudioSection(preset: $preset)
-                    case .properties:
-                        ProcessPropertiesSection(preset: $preset)
+            Divider()
+
+            HSplitView {
+                VStack(alignment: .leading, spacing: 14) {
+                    StudioPreviewCard(preset: preset)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Studio")
+                            .font(.title2.weight(.semibold))
+                        Text(preset.name)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Picker("Section", selection: $tab) {
+                        ForEach(StudioTab.allCases) { tab in
+                            Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+
+                    Spacer()
+
+                    Button(action: duplicatePreset) {
+                        Label("Duplicate Dashboard", systemImage: "plus.square.on.square")
+                    }
+                    Button(role: .destructive, action: resetDefaults) {
+                        Label("Reset Defaults", systemImage: "arrow.counterclockwise")
                     }
                 }
-                .padding(20)
+                .padding(18)
+                .frame(minWidth: 220, idealWidth: 240, maxWidth: 280)
+                .background(.bar)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        switch tab {
+                        case .style:
+                            StyleStudioSection(preset: $preset, themes: themes)
+                        case .widgets:
+                            WidgetStudioSection(preset: $preset)
+                        case .properties:
+                            ProcessPropertiesSection(preset: $preset)
+                        }
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minWidth: 500)
             }
-            .frame(minWidth: 420)
         }
     }
 }
@@ -1624,7 +1654,7 @@ private struct StyleStudioSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             StudioSectionHeader(title: "Focus Profile", systemImage: "dial.high")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 230), spacing: 10)], spacing: 10) {
                 ForEach(FocusProfile.allCases) { profile in
                     FocusProfileStudioButton(
                         profile: profile,
@@ -1792,12 +1822,13 @@ private struct FocusProfileStudioButton: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
 
-                HStack {
+                HStack(spacing: 6) {
                     BadgeLabel(title: String(format: "%.1fs", profile.refreshInterval), systemImage: "timer")
                     BadgeLabel(title: profile.processSort.column.title, systemImage: "arrow.up.arrow.down")
                 }
             }
             .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
