@@ -59,6 +59,48 @@ final class PulseboardTests: XCTestCase {
         XCTAssertEqual(reloaded.presets.first?.resolvedCardStyle, .solid)
     }
 
+    func testPresetNormalizationRepairsEditableState() {
+        let preset = DashboardPreset(
+            name: "   ",
+            subtitle: "   ",
+            symbolName: "  cpu  ",
+            refreshInterval: 42,
+            theme: ThemeConfig(
+                name: "   ",
+                mode: .dark,
+                density: .dense,
+                chartStyle: .line,
+                accentHex: "not-a-color",
+                secondaryHex: "abc",
+                warningThreshold: 95,
+                criticalThreshold: 15
+            ),
+            widgets: [
+                WidgetConfig(kind: .cpu, title: "   ", size: .compact, order: 4),
+                WidgetConfig(kind: .cpu, title: "Duplicate", size: .wide, order: 5)
+            ],
+            columns: [
+                ColumnConfig(id: .name, isVisible: true, width: 12),
+                ColumnConfig(id: .cpu, isVisible: true, width: 2_000)
+            ]
+        ).normalized()
+
+        XCTAssertEqual(preset.name, "Untitled Dashboard")
+        XCTAssertNil(preset.subtitle)
+        XCTAssertEqual(preset.resolvedSymbolName, "cpu")
+        XCTAssertEqual(preset.refreshInterval, 5)
+        XCTAssertEqual(preset.theme.name, "Custom Theme")
+        XCTAssertEqual(preset.theme.accentHex, ThemeConfig.aurora.accentHex)
+        XCTAssertEqual(preset.theme.secondaryHex, "#ABC")
+        XCTAssertLessThanOrEqual(preset.theme.warningThreshold, preset.theme.criticalThreshold)
+        XCTAssertEqual(Set(preset.widgets.map(\.kind)), Set(WidgetKind.allCases))
+        XCTAssertEqual(preset.widgets.map(\.order), Array(0..<preset.widgets.count))
+        XCTAssertEqual(preset.widgets.first?.title, WidgetKind.cpu.defaultTitle)
+        XCTAssertEqual(preset.columns.count, DashboardPreset.defaultColumns.count)
+        XCTAssertEqual(preset.columns.first(where: { $0.id == .name })?.width, 48)
+        XCTAssertEqual(preset.columns.first(where: { $0.id == .cpu })?.width, 900)
+    }
+
     func testCPUPercentRequiresPreviousSample() {
         XCTAssertEqual(MetricCalculator.processCPUPercent(current: 10_000, previous: nil, elapsed: 1), 0)
         XCTAssertEqual(MetricCalculator.processCPUPercent(current: 2_000_000_000, previous: 1_000_000_000, elapsed: 1), 100, accuracy: 0.001)

@@ -192,6 +192,47 @@ public struct ThemeConfig: Codable, Equatable, Identifiable, Sendable {
         warningThreshold: 68,
         criticalThreshold: 86
     )
+
+    public static let builtIns: [ThemeConfig] = [
+        .aurora,
+        .neonDesk,
+        .graphite,
+        .clarity,
+        .fieldNotes,
+        .highContrast
+    ]
+}
+
+public extension ThemeConfig {
+    func normalized() -> ThemeConfig {
+        var copy = self
+        copy.name = copy.name.trimmedOrFallback("Custom Theme")
+        copy.accentHex = Self.normalizedHex(copy.accentHex, fallback: ThemeConfig.aurora.accentHex)
+        copy.secondaryHex = Self.normalizedHex(copy.secondaryHex, fallback: ThemeConfig.aurora.secondaryHex)
+        copy.warningThreshold = copy.warningThreshold.clamped(to: 0...100)
+        copy.criticalThreshold = copy.criticalThreshold.clamped(to: 0...100)
+
+        if copy.criticalThreshold < copy.warningThreshold {
+            swap(&copy.warningThreshold, &copy.criticalThreshold)
+        }
+
+        return copy
+    }
+
+    private static func normalizedHex(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitized = trimmed.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard sanitized.count == 3 || sanitized.count == 6 || sanitized.count == 8 else {
+            return fallback
+        }
+
+        let hexCharacters = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        guard sanitized.unicodeScalars.allSatisfy({ hexCharacters.contains($0) }) else {
+            return fallback
+        }
+
+        return "#\(sanitized.uppercased())"
+    }
 }
 
 public struct WidgetConfig: Codable, Equatable, Identifiable, Sendable {
@@ -375,9 +416,80 @@ public struct DashboardPreset: Codable, Equatable, Identifiable, Sendable {
 public extension DashboardPreset {
     var resolvedCanvasStyle: CanvasStyle { canvasStyle ?? .studio }
     var resolvedCardStyle: CardStyle { cardStyle ?? .glass }
-    var resolvedSymbolName: String { symbolName?.isEmpty == false ? symbolName! : "rectangle.3.group" }
-    var resolvedSubtitle: String { subtitle?.isEmpty == false ? subtitle! : "Live system cockpit" }
+    var resolvedSymbolName: String { symbolName?.trimmedOrNil ?? "rectangle.3.group" }
+    var resolvedSubtitle: String { subtitle?.trimmedOrNil ?? "Live system cockpit" }
     var resolvedShowSignalRail: Bool { showSignalRail ?? true }
+
+    func normalized() -> DashboardPreset {
+        var copy = self
+        copy.name = copy.name.trimmedOrFallback("Untitled Dashboard")
+        copy.subtitle = copy.subtitle?.trimmedOrNil
+        copy.symbolName = copy.symbolName?.trimmedOrNil
+        copy.refreshInterval = copy.refreshInterval.clamped(to: 0.5...5)
+        copy.theme = copy.theme.normalized()
+        copy.canvasStyle = copy.resolvedCanvasStyle
+        copy.cardStyle = copy.resolvedCardStyle
+        copy.showSignalRail = copy.resolvedShowSignalRail
+        copy.widgets = Self.normalizedWidgets(copy.widgets)
+        copy.columns = Self.normalizedColumns(copy.columns)
+        return copy
+    }
+
+    private static func normalizedWidgets(_ widgets: [WidgetConfig]) -> [WidgetConfig] {
+        var seenKinds = Set<WidgetKind>()
+        var seenIDs = Set<UUID>()
+        var normalized: [WidgetConfig] = []
+
+        for widget in widgets.sorted(by: { $0.order < $1.order }) {
+            guard !seenKinds.contains(widget.kind) else { continue }
+            seenKinds.insert(widget.kind)
+
+            var copy = widget
+            if seenIDs.contains(copy.id) {
+                copy.id = UUID()
+            }
+            seenIDs.insert(copy.id)
+            copy.title = copy.title.trimmedOrFallback(copy.kind.defaultTitle)
+            normalized.append(copy)
+        }
+
+        for widget in defaultWidgets where !seenKinds.contains(widget.kind) {
+            normalized.append(widget)
+        }
+
+        for index in normalized.indices {
+            normalized[index].order = index
+        }
+
+        return normalized
+    }
+
+    private static func normalizedColumns(_ columns: [ColumnConfig]) -> [ColumnConfig] {
+        let existingByID = Dictionary(columns.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        return defaultColumns.map { fallback in
+            var copy = existingByID[fallback.id] ?? fallback
+            copy.width = copy.width.clamped(to: 48...900)
+            return copy
+        }
+    }
+}
+
+private extension String {
+    var trimmedOrNil: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func trimmedOrFallback(_ fallback: String) -> String {
+        trimmedOrNil ?? fallback
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
 }
 
 public struct SystemCounters: Equatable, Sendable {

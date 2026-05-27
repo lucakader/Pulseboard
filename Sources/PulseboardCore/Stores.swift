@@ -21,7 +21,7 @@ public final class PresetStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
 
         let loaded = Self.load(from: self.storageURL, decoder: decoder)
-        let initialPresets = loaded.isEmpty ? DashboardPreset.defaults : loaded
+        let initialPresets = (loaded.isEmpty ? DashboardPreset.defaults : loaded).map { $0.normalized() }
         self.presets = initialPresets
         self.selectedPresetID = initialPresets.first?.id ?? UUID()
 
@@ -32,7 +32,7 @@ public final class PresetStore: ObservableObject {
 
     public var selectedPreset: DashboardPreset {
         get {
-            presets.first(where: { $0.id == selectedPresetID }) ?? presets[0]
+            presets.first(where: { $0.id == selectedPresetID }) ?? presets.first ?? DashboardPreset.defaults[0]
         }
         set {
             updatePreset(newValue)
@@ -45,7 +45,7 @@ public final class PresetStore: ObservableObject {
     }
 
     public func updatePreset(_ preset: DashboardPreset) {
-        var copy = preset
+        var copy = preset.normalized()
         copy.updatedAt = Date()
 
         if let index = presets.firstIndex(where: { $0.id == copy.id }) {
@@ -68,7 +68,7 @@ public final class PresetStore: ObservableObject {
     }
 
     public func resetDefaults() {
-        presets = DashboardPreset.defaults
+        presets = DashboardPreset.defaults.map { $0.normalized() }
         selectedPresetID = presets[0].id
         save()
     }
@@ -94,7 +94,7 @@ public final class PresetStore: ObservableObject {
         do {
             let folder = storageURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let data = try encoder.encode(presets)
+            let data = try encoder.encode(presets.map { $0.normalized() })
             try data.write(to: storageURL, options: .atomic)
         } catch {
             NSLog("Pulseboard failed to save presets: \(error.localizedDescription)")

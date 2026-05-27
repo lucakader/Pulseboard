@@ -1337,7 +1337,7 @@ private struct CustomizationView: View {
 
     @State private var tab: StudioTab = .style
 
-    private let themes: [ThemeConfig] = [.aurora, .neonDesk, .graphite, .clarity, .fieldNotes, .highContrast]
+    private let themes = ThemeConfig.builtIns
 
     var body: some View {
         HSplitView {
