@@ -1,5 +1,7 @@
 # Pulseboard
 
+[![CI](https://github.com/lucakader/Pulseboard/actions/workflows/ci.yml/badge.svg)](https://github.com/lucakader/Pulseboard/actions/workflows/ci.yml)
+
 Pulseboard is a native macOS Activity Monitor reimagining built with Swift, SwiftUI, AppKit, and public Darwin APIs. It now has a Notion-style customization studio for shaping dashboards, cards, themes, widgets, and process-table properties.
 
 ## Run
